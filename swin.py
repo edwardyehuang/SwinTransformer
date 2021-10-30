@@ -355,15 +355,13 @@ class BasicLayer(tf.keras.Model):
                        attn_drop=0.,
                        drop_path_prob = 0., 
                        norm_layer = tf.keras.layers.LayerNormalization, 
-                       downsample = None, 
-                       use_checkpoint = False, 
+                       downsample = None,
                        name = None):
 
         super().__init__(name = name)
 
         self.filters = filters
         self.depth = depth
-        self.use_checkpoint = use_checkpoint
 
         self.shift_size = window_size // 2
         self.window_size = window_size
@@ -448,10 +446,12 @@ class BasicLayer(tf.keras.Model):
         for block in self.blocks:
             x = block(x, attention_mask = attn_mask, training = training)
 
+        before_downsample = x
+
         if self.downsample is not None:
             x = self.downsample(x, training = training)
 
-        return x
+        return x, before_downsample
 
 
 class PatchEmbed(tf.keras.Model):
@@ -520,7 +520,6 @@ class SwinTransformerModel(tf.keras.Model):
                        norm_layer = tf.keras.layers.LayerNormalization, 
                        use_absolute_pos_embed = False, 
                        patch_norm = True,
-                       use_checkpoint = False, 
                        return_endpoints = False,
                        name = 'swin_tiny_patch4_window7_224',
                        **kwargs):
@@ -546,8 +545,6 @@ class SwinTransformerModel(tf.keras.Model):
         self.drop_path_rate         = drop_path_rate
 
         self.norm_layer             = norm_layer
-
-        self.use_checkpoint         = use_checkpoint
 
         self.return_endpoints       = return_endpoints
 
@@ -592,7 +589,6 @@ class SwinTransformerModel(tf.keras.Model):
                                      drop_path_prob = dpr[sum(self.depths[:i_layer]):sum(self.depths[:i_layer + 1])],
                                      norm_layer = self.norm_layer,
                                      downsample = PatchMerging if (i_layer < self.num_layers - 1) else None,
-                                     use_checkpoint = self.use_checkpoint,
                                      name = f'layers/{i_layer}')
 
             self.basic_layers.append(basic_layer)
@@ -609,13 +605,13 @@ class SwinTransformerModel(tf.keras.Model):
 
         x = self.pos_drop(x, training = training)
 
-        endpoints = []
+        endpoints = [x]
 
         for layer in self.basic_layers:
-            x = layer(x, training = training)
-            endpoints += [x]
+            x, before_downsample = layer(x, training = training)
+            endpoints += [before_downsample]
 
-        assert len(endpoints) == len(self.basic_layers)
+        assert len(endpoints) == len(self.basic_layers) + 1
 
         if self.return_endpoints:
             return endpoints
